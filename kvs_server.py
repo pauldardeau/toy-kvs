@@ -5,22 +5,33 @@ import mem_kvs
 
 class MemKVSTCPHandler(SocketServer.BaseRequestHandler):
 
-    def do_put(self, key, value):
-        kvs.put(key, value)
-        return kvs.contains_key(key)
-
-    def do_get(self, key):
-        if kvs.contains_key(key):
-            return (True, kvs.get(key))
+    def do_put(self, key, value, container=None):
+        if container is not None:
+            kvs.container_put(container, key, value)
+            return kvs.container_contains_key(container, key)
         else:
-            return False, None
+            kvs.put(key, value)
+            return kvs.contains_key(key)
 
-    def do_delete(self, key):
-        if kvs.contains_key(key):
-            kvs.delete(key)
-            return not kvs.contains_key(key)
+    def do_get(self, key, container=None):
+        if container is not None:
+            if kvs.container_contains_key(container, key):
+                return (True, kvs.container_get(container, key))
         else:
-            return False
+            if kvs.contains_key(key):
+                return (True, kvs.get(key))
+        return False, None
+
+    def do_delete(self, key, container=None):
+        if container is not None:
+            if kvs.container_contains_key(container, key):
+                kvs.container_delete(container, key)
+                return not kvs.container_contains_key(container, key)
+        else:
+            if kvs.contains_key(key):
+                kvs.delete(key)
+                return not kvs.contains_key(key)
+        return False
 
     def handle(self):
         # self.request is the TCP socket connected to the client
@@ -29,10 +40,14 @@ class MemKVSTCPHandler(SocketServer.BaseRequestHandler):
         msg = ""
         op = ""
         self.key = ""
+        container = None
         success = False
+        value = None
         if req_json is not None and len(req_json) > 0:
             self.req_payload = json.loads(req_json)
             if 'op' in self.req_payload:
+                if 'container' in self.req_payload:
+                    container = self.req_payload['container']
                 op = self.req_payload['op']
                 if op in ['get','put','delete']:
                     if 'key' in self.req_payload:
@@ -44,14 +59,14 @@ class MemKVSTCPHandler(SocketServer.BaseRequestHandler):
                                     if self.value is None:
                                         msg = "invalid value for put"
                                     else:
-                                        success = self.do_put(self.key, self.value)
+                                        success = self.do_put(self.key, self.value, container)
                                 else:
                                     msg = "missing value for put"
                             else:
                                 if op == 'get':
-                                    success, value = self.do_get(self.key)
+                                    success, value = self.do_get(self.key, container)
                                 elif op == 'delete':
-                                    success = self.do_delete(self.key)
+                                    success = self.do_delete(self.key, container)
                         else:
                             # invalid key
                             msg = "invalid key"
@@ -76,6 +91,10 @@ class MemKVSTCPHandler(SocketServer.BaseRequestHandler):
         resp_payload['msg'] = msg
         resp_payload['op'] = op
         resp_payload['key'] = self.key
+        if container is not None:
+            resp_payload['container'] = container
+        if value is not None:
+            resp_payload['value'] = value
 
         self.request.sendall(json.dumps(resp_payload))
 
